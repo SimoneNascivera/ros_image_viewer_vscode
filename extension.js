@@ -2,6 +2,7 @@ const vscode = require('vscode');
 const { spawn } = require('child_process');
 const { promisify } = require('util');
 const exec = promisify(require('child_process').exec);
+const net = require('net');
 
 function activate(context) {
     let disposable = vscode.commands.registerCommand('ros-image-view.viewImage', selectTopicAndShow);
@@ -9,15 +10,36 @@ function activate(context) {
     context.subscriptions.push(disposable);
 }
 
+async function getPortFree() {
+    return new Promise( res => {
+        const srv = net.createServer();
+        srv.listen(0, () => {
+            const port = srv.address().port
+            srv.close((err) => res(port))
+        });
+    })
+}
+
 async function selectTopicAndShow(){
-    const process = spawn('rosrun', ['web_video_server', 'web_video_server']);
+    const port = await getPortFree();
+
+    try {
+        const { _, roscore_err } = await exec('rostopic list');
+    } catch (error) {
+        vscode.window.showInformationMessage('Error: roscore is not running');
+        return;
+    }
+
+    const process = spawn('rosrun', ['web_video_server', 'web_video_server', '_port:='+ port]);
 
     process.stdout.on('data', (data) => {
     console.log(`stdout: ${data}`);
     });
 
     process.stderr.on('data', (data) => {
-    console.error(`stderr: ${data}`);
+        console.error(`stderr: ${data}`);
+        vscode.window.showInformationMessage('Error: web_video_server not installed');
+        return;
     });
 
     process.on('close', (code) => {
@@ -77,7 +99,7 @@ async function selectTopicAndShow(){
     <body>
         <div id="image"></div>
         <script>
-            document.getElementById('image').innerHTML = \`<img src="http://localhost:8080/stream?topic=${choosenTopic}" alt="ROS Image">\`;
+            document.getElementById('image').innerHTML = \`<img src="http://localhost:${port}/stream?topic=${choosenTopic}" alt="ROS Image">\`;
         </script>
     </body>
     </html>
